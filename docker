@@ -460,3 +460,435 @@ HTTPS 및 도메인 적용
 Git 기반 CI/CD(예: GitHub Actions 또는 Jenkins)로 자동 배포
 
 태원님이 이전에 말씀하셨던 VM 기반 CI/CD 자동화까지 고려한다면, 이 구조가 가장 확장성과 운영성이 좋습니다. 이후 Git에 푸시하면 VM이 자동으로 소스를 받아 가상환경을 갱신하고 서비스를 재시작하는 형태로 자연스럽게 발전시킬 수 있습니다.
+
+
+=========================================
+
+
+
+
+
+
+그러면 해당 반영 MS들을 .venv를 쓰지 않고 각각을 도커로 생성한다면, 다시 가이드 부탁해
+
+좋습니다, 태원님.
+
+오히려 지금 시점이라면 .venv 방식보다 Docker 방식을 추천드립니다.
+
+특히 태원님 프로젝트가
+
+Python Micro Service 여러 개
+VM에서 운영
+나중에 CI/CD 구축 예정
+서비스마다 사용하는 라이브러리가 다를 수 있음
+
+이라면 Docker가 훨씬 관리하기 쉽습니다.
+
+전체 아키텍처
+
+기존에는
+
+Ubuntu
+ ├── imap-auth
+ │    └── .venv
+ ├── imap-dna
+ │    └── .venv
+ ├── imap-parser
+ │    └── .venv
+
+였다면
+
+Docker에서는
+
+Ubuntu
+    │
+Docker Engine
+    │
+    ├── Container (imap-auth)
+    │       Python
+    │       FastAPI
+    │       requirements
+    │
+    ├── Container (imap-dna)
+    │       Python
+    │
+    ├── Container (imap-parser)
+    │       Python
+    │
+    └── Container (imap-worker)
+
+입니다.
+
+즉,
+
+venv 하나 = Docker Container 하나
+
+라고 생각하면 이해가 쉽습니다.
+
+1. Ubuntu에 Docker 설치
+sudo apt update
+
+sudo apt install docker.io docker-compose-v2 -y
+
+자동 시작
+
+sudo systemctl enable docker
+sudo systemctl start docker
+
+확인
+
+docker --version
+docker compose version
+2. 프로젝트 구조
+
+추천 구조입니다.
+
+/opt/imap
+
+    docker-compose.yml
+
+    imap-auth/
+        app.py
+        requirements.txt
+        Dockerfile
+
+    imap-dna/
+        app.py
+        requirements.txt
+        Dockerfile
+
+    imap-parser/
+        app.py
+        requirements.txt
+        Dockerfile
+
+    imap-worker/
+        app.py
+        requirements.txt
+        Dockerfile
+
+여기서 중요한 것은
+
+각 Micro Service마다 Dockerfile이 하나씩 존재하는 것입니다.
+
+3. Dockerfile 만들기
+
+예를 들어
+
+imap-auth
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8001
+
+CMD ["python", "app.py"]
+
+끝입니다.
+
+venv가 전혀 필요 없습니다.
+
+왜냐하면
+
+Container 자체가
+독립된 Python 환경
+
+이기 때문입니다.
+
+4. requirements.txt
+
+예)
+
+fastapi
+uvicorn
+redis
+requests
+numpy
+pandas
+
+컨테이너 생성 시 자동 설치됩니다.
+
+5. docker-compose 작성
+
+가장 중요한 파일입니다.
+
+version: '3.9'
+
+services:
+
+  auth:
+    build: ./imap-auth
+    container_name: imap-auth
+    ports:
+      - "8001:8001"
+    restart: always
+
+  dna:
+    build: ./imap-dna
+    container_name: imap-dna
+    ports:
+      - "8002:8002"
+    restart: always
+
+  parser:
+    build: ./imap-parser
+    container_name: imap-parser
+    ports:
+      - "8003:8003"
+    restart: always
+
+  worker:
+    build: ./imap-worker
+    container_name: imap-worker
+    ports:
+      - "8004:8004"
+    restart: always
+6. 실행
+cd /opt/imap
+
+docker compose up -d
+
+이 한 줄이면
+
+Dockerfile 빌드
+
+↓
+
+Python 설치
+
+↓
+
+requirements 설치
+
+↓
+
+컨테이너 생성
+
+↓
+
+자동 실행
+
+모두 끝납니다.
+
+7. 확인
+docker ps
+imap-auth
+
+imap-dna
+
+imap-parser
+
+imap-worker
+
+가 실행 중이면 성공입니다.
+
+8. 로그 확인
+
+예)
+
+docker logs imap-auth
+
+실시간
+
+docker logs -f imap-auth
+9. 수정 후 재배포
+
+예를 들어
+
+auth 수정
+
+cd /opt/imap
+
+docker compose build auth
+
+docker compose up -d auth
+
+또는
+
+docker compose up -d --build auth
+10. 업데이트
+
+Git Pull
+
+git pull
+
+재빌드
+
+docker compose up -d --build
+
+끝입니다.
+
+11. 서비스 간 통신
+
+이게 Docker의 장점입니다.
+
+예를 들어
+
+auth에서
+
+requests.get("http://imap-dna:8002/status")
+
+처럼 호출하고 싶을 수 있는데, container_name이 항상 DNS 이름으로 동작하는 것은 아닙니다. 같은 Docker Compose 네트워크에서는 서비스 이름을 사용하는 것이 권장됩니다.
+
+즉 docker-compose.yml에서 서비스 이름이 dna라면
+
+requests.get("http://dna:8002/status")
+
+처럼 호출하면 됩니다.
+
+Docker가 내부 DNS를 자동으로 제공합니다.
+
+12. 환경 변수
+
+예)
+
+services:
+
+  auth:
+
+    environment:
+
+      DB_HOST=db
+
+      JWT_SECRET=1234
+
+Python
+
+import os
+
+secret = os.getenv("JWT_SECRET")
+13. 데이터 유지
+
+로그
+
+DB
+
+파일
+
+등은
+
+volumes:
+
+    - ./logs:/logs
+
+처럼 Volume으로 연결합니다.
+
+예)
+
+Container
+
+    /logs
+
+        ↓
+
+Ubuntu
+
+/opt/imap/logs
+
+컨테이너를 삭제해도 로그가 남습니다.
+
+14. nginx
+
+운영에서는 거의 필수입니다.
+
+인터넷
+
+      │
+
+    Nginx
+
+      │
+
+ ┌────┴────┐
+
+8001
+
+8002
+
+8003
+
+8004
+
+클라이언트는
+
+https://server/api/auth
+
+https://server/api/parser
+
+https://server/api/dna
+
+처럼 접속하고,
+
+Nginx가 각각의 컨테이너로 프록시합니다.
+
+15. CI/CD
+
+나중에는
+
+Git Push
+
+↓
+
+GitHub Action
+
+↓
+
+SSH
+
+↓
+
+git pull
+
+↓
+
+docker compose up -d --build
+
+↓
+
+배포 완료
+
+이 구조가 가장 깔끔합니다.
+
+제가 추천하는 최종 운영 구조
+Ubuntu VM
+│
+├── Docker Engine
+│
+├── docker-compose.yml
+│
+├── imap-auth
+│      ├── Dockerfile
+│      ├── requirements.txt
+│      └── app.py
+│
+├── imap-dna
+│      ├── Dockerfile
+│      ├── requirements.txt
+│      └── app.py
+│
+├── imap-parser
+│
+├── imap-worker
+│
+├── logs/
+│
+└── nginx
+태원님 프로젝트에서는 한 가지 더 추천드립니다.
+
+현재 구조가 imap-auth, imap-dna, imap-parser, imap-worker처럼 여러 Python MS를 함께 운영하는 플랫폼이라면, docker-compose.yml 하나에 모든 서비스를 정의하는 것도 좋지만, 각 서비스마다 독립적인 docker-compose.yml을 두고 상위 디렉터리에서 관리하는 방식도 고려해볼 만합니다. 이렇게 하면 특정 서비스만 독립적으로 배포하거나 롤백하기가 쉬워지고, 나중에 서비스 수가 늘어나도 관리가 편해집니다.
+
+다음 단계에서는 "실제 삼성 프로젝트 수준"을 가정해서 다음 요소까지 포함한 운영 구조를 함께 설계해 드릴 수 있습니다.
+
+Docker + Nginx + Redis + PostgreSQL
+공통 네트워크 구성
+.env를 이용한 환경별 설정(dev/stage/prod)
+GitHub Actions 또는 Jenkins 기반 무중단 CI/CD
+헬스체크와 자동 재시작 정책
+로그 수집(예: Loki, ELK 등)까지 고려한 운영 아키텍처
