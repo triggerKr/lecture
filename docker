@@ -97,3 +97,366 @@
     docker compose up -d --build order-service
 
 
+====================================================================
+
+
+
+
+
+나는 지금 리눅스 우분투 서버에 내가 현재 로컬에 가지고 있는 파이썬 마이크로 서비스들을 올려서 운영 해 보려 해. 일단 텅빈 VM 을 배당 받긴 했는데, 거기에 MS를 올리려고 하는데 가이드좀 해줘.
+
+물론입니다, 태원님.
+
+지금부터는 "개발 PC에 있는 Python Micro Service들을 Ubuntu VM에 배포해서 운영하는 환경"을 구축하는 과정이라고 생각하면 됩니다.
+
+태원님이 앞으로 하시려는 프로젝트가 삼성 디지털트윈(iMAP 계열)처럼 여러 Python MS가 각각 독립적으로 돌아가는 구조라면, 처음부터 운영환경을 잘 만들어두는 것이 굉장히 중요합니다.
+
+제가 추천하는 방식은 Docker 없이 Linux Native 환경 기준으로 설명드리겠습니다. (나중에 Docker로 변경하는 것도 가능합니다.)
+
+전체 구조
+
+예를 들어 현재 로컬이
+
+imap-auth
+imap-dna
+imap-parser
+imap-worker
+
+이렇게 있다고 가정하겠습니다.
+
+Ubuntu 서버에서는 이렇게 구성하는 것을 추천합니다.
+
+/opt/imap/
+    imap-auth/
+        .venv/
+        app.py
+        requirements.txt
+        logs/
+        config/
+
+    imap-dna/
+        .venv/
+        ...
+
+    imap-parser/
+        .venv/
+        ...
+
+    imap-worker/
+        .venv/
+        ...
+
+즉
+
+서비스 하나
+=
+폴더 하나
+=
+venv 하나
+
+입니다.
+
+현재 운영하는 방식과 거의 동일합니다.
+
+1단계 Ubuntu 기본 세팅
+
+먼저 접속
+
+ssh user@server-ip
+
+업데이트
+
+sudo apt update
+sudo apt upgrade -y
+
+필수 프로그램 설치
+
+sudo apt install -y
+
+git
+
+python3
+
+python3-pip
+
+python3-venv
+
+build-essential
+
+curl
+
+wget
+
+vim
+
+버전 확인
+
+python3 --version
+pip3 --version
+2단계 프로젝트 폴더 생성
+sudo mkdir -p /opt/imap
+
+권한
+
+sudo chown $USER:$USER /opt/imap
+
+이후
+
+cd /opt/imap
+3단계 소스 올리기
+
+방법은 여러가지입니다.
+
+가장 추천
+
+Git
+
+git clone
+
+또는
+
+scp
+
+scp -r imap-auth user@server:/opt/imap/
+
+또는
+
+WinSCP
+
+또는
+
+VSCode Remote SSH
+
+4단계 venv 생성
+
+예)
+
+cd /opt/imap/imap-auth
+
+python3 -m venv .venv
+
+활성화
+
+source .venv/bin/activate
+
+확인
+
+which python
+
+결과
+
+/opt/imap/imap-auth/.venv/bin/python
+5단계 라이브러리 설치
+pip install -r requirements.txt
+
+또는
+
+pip install fastapi
+pip install uvicorn
+...
+6단계 실행 확인
+
+예)
+
+python app.py
+
+또는
+
+uvicorn main:app
+
+브라우저에서
+
+http://IP:8000
+
+확인
+
+7단계 방화벽
+
+Ubuntu에는
+
+ufw
+
+가 있습니다.
+
+확인
+
+sudo ufw status
+
+8000 포트 허용
+
+sudo ufw allow 8000
+8단계 백그라운드 실행
+
+처음에는
+
+nohup
+
+으로도 됩니다.
+
+예)
+
+nohup python app.py &
+
+하지만 운영환경에서는 비추천입니다.
+
+9단계 systemd 서비스 등록 (강력 추천)
+
+예를 들어
+
+imap-auth
+
+서비스를 등록합니다.
+
+sudo vim /etc/systemd/system/imap-auth.service
+
+내용
+
+[Unit]
+Description=imap-auth
+After=network.target
+
+[Service]
+
+User=ubuntu
+
+WorkingDirectory=/opt/imap/imap-auth
+
+ExecStart=/opt/imap/imap-auth/.venv/bin/python app.py
+
+Restart=always
+
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+저장 후
+
+sudo systemctl daemon-reload
+
+서비스 등록
+
+sudo systemctl enable imap-auth
+
+시작
+
+sudo systemctl start imap-auth
+
+확인
+
+sudo systemctl status imap-auth
+10단계 로그 확인
+journalctl -u imap-auth -f
+
+실시간 로그가 출력됩니다.
+
+11단계 서버 재부팅 테스트
+sudo reboot
+
+재접속
+
+systemctl status imap-auth
+
+자동 실행되면 성공입니다.
+
+운영환경에서는 추가하면 좋은 것들
+nginx
+
+여러 Micro Service 앞에 Reverse Proxy
+
+Client
+      ↓
+Nginx
+      ↓
+8001 auth
+8002 parser
+8003 dna
+8004 worker
+HTTPS
+Let's Encrypt
+
+적용
+
+Supervisor
+
+예전에는 많이 사용했지만
+
+요즘은 대부분
+
+systemd
+
+를 사용합니다.
+
+환경변수
+.env
+
+관리
+
+예)
+
+DB_URL=
+
+JWT_KEY=
+
+REDIS_HOST=
+로그 폴더
+logs/
+auth.log
+
+worker.log
+
+parser.log
+태원님 프로젝트라면 제가 추천하는 최종 운영 구조
+Ubuntu VM
+
+/opt/imap
+    imap-auth
+        .venv
+        logs
+        config
+        requirements.txt
+
+    imap-dna
+        .venv
+        logs
+
+    imap-parser
+        .venv
+        logs
+
+    imap-worker
+        .venv
+        logs
+
+/etc/systemd/system
+    imap-auth.service
+    imap-dna.service
+    imap-parser.service
+    imap-worker.service
+
+Nginx
+
+    80
+    443
+
+        ↓
+
+    auth :8001
+
+    dna :8002
+
+    parser :8003
+
+    worker :8004
+
+제가 추천드리는 방식은 개발 → 테스트 → 운영 순서로 진행하는 것입니다.
+
+Python 및 필수 패키지 설치
+프로젝트 복사 및 .venv 구성
+서비스 단독 실행 확인
+systemd로 서비스 등록
+nginx Reverse Proxy 구성
+HTTPS 및 도메인 적용
+Git 기반 CI/CD(예: GitHub Actions 또는 Jenkins)로 자동 배포
+
+태원님이 이전에 말씀하셨던 VM 기반 CI/CD 자동화까지 고려한다면, 이 구조가 가장 확장성과 운영성이 좋습니다. 이후 Git에 푸시하면 VM이 자동으로 소스를 받아 가상환경을 갱신하고 서비스를 재시작하는 형태로 자연스럽게 발전시킬 수 있습니다.
