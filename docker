@@ -1,0 +1,99 @@
+
+
+전체 프로세스를 
+[파일 업로드] → [도커 파일 준비] → [실행] 순서로 깔끔한 정리.
+
+1단계: 로컬 폴더를 우분투 어디?
+    1) 우분투 서버의 추천 경로
+    우분투 리눅스에서 일반 사용자가 가장 자유롭게 권한 제약 없이 쓸 수 있는 공간은 홈 디렉토리(~/) 내부입니다. 내일 접속할 계정 이름이 ubuntu라고 가정하면, 아래 경로에 작업 폴더생성.
+
+    추천 경로: /home/ubuntu/apps/ (또는 간단히 ~/apps/)
+
+    2) 폴더를 업로드하는 가장 쉬운 방법 (GUI 도구 사용)
+    터미널 명령어로 업로드하는 것보다 윈도우 화면에서 드래그 앤 드롭.
+    (FileZilla, MobaXterm ) SFTP 
+
+    서버에 원격 접속.
+    /home/ubuntu/ 경로 아래에 apps라는 폴더생성.
+    로컬 폴더들을 통째로 선택해 apps 폴더 안으로 드래그 앤 드롭.
+
+2단계: 도커를 사용하기 위한 파일 준비 (각 폴더별 세팅)
+    폴더 업로드가 끝났다면, 이제 리눅스 터미널(SSH)에 접속해서 도커를 태울 준비를 합니다.
+
+    1) 각 마이크로서비스 폴더마다 Dockerfile 만들기
+    각 imap-* 폴더 내부에 확장자 없이 Dockerfile이라는 이름으로 파일을 하나씩 생성 후 
+    아래 내용 작성.
+
+        Dockerfile
+        # 1. 파이썬 실행 환경 베이스 지정
+        FROM python:3.11-slim
+
+        # 2. 컨테이너 내부의 작업 디렉토리 설정
+        WORKDIR /app
+
+        # 3. 라이브러리 목록 복사 및 설치 (가상환경 필요 없음, 도커 자체가 격리 공간)
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+
+        # 4. 소스 코드 전체 복사
+        COPY . .
+
+        # 5. 프로그램 실행 (FastAPI/Uvicorn 예시 - 포트는 서비스마다 다르게 설정)
+        EXPOSE 8000
+        CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+        💡 핵심 포인트: 도커 컨테이너 자체가 완전히 격리된 룸이기 때문에, 도커 내부에서는 .venv를 만들 필요가 없습니다! pip install을 하면 도커 룸 안에 알아서 깔끔하게 설치됩니다.
+
+    2) 최상위 apps 폴더에 docker-compose.yml 생성.
+    모든 imap-* 폴더들이 모여있는 /home/ubuntu/apps/ 바로 아래에 
+    총지휘관 파일인 docker-compose.yml을 생성.
+
+        YAML
+        version: '3.8'
+
+        services:
+        # 1. 인증 서비스
+        auth-service:
+            build: ./imap-auth          # imap-auth 폴더에 있는 Dockerfile을 읽어서 빌드해라
+            container_name: imap-auth
+            ports:
+            - "8000:8000"             # 외부포트:컨테이너내부포트
+            restart: always             # 프로그램이 죽으면 도커가 알아서 자동 재시작!
+
+        # 2. 주문 서비스
+        order-service:
+            build: ./imap-order         # imap-order 폴더에 있는 Dockerfile을 읽어서 빌드해라
+            container_name: imap-order
+            ports:
+            - "8001:8001"
+            restart: always
+
+
+3단계: 도커로 마이크로서비스 일괄 실행
+        모든 파일 준비가 끝났다면, 터미널에서 /home/ubuntu/apps/ 경로로 이동한 뒤 
+        아래 명령어 딱 하나만 실행.
+
+        Bash
+        # 이미지 빌드 및 백그라운드 가동
+        docker compose up -d --build
+
+🌟 이 시점부터 개발자님이 누리게 될 도커의 강력한 장점들:
+1. 배치 파일 무용지물 (자동 관리): 이제 폴더마다 들어가서 start.bat를 일일이 누를 필요가 없습니다. docker compose up 명령 하나로 5개든 10개든 마이크로서비스가 한 번에 다 켜집니다.
+
+2. 완벽한 백그라운드 운영 (-d 옵션): 터미널 창을 닫아도 서비스들은 리눅스 백그라운드에서 안전하게 계속 돌아갑니다. nohup 같은 복잡한 리눅스 명령어를 따로 공부하실 필요가 없습니다.
+
+3. 모니터링의 단순화: 어떤 서비스가 잘 돌고 있고 어떤 포트를 쓰는지 한눈에 보고 싶다면 아래 명령어 하나로 끝납니다.
+
+        Bash
+        docker compose ps
+
+4. 실시간 로그 통합 확인: 특정 마이크로서비스에서 에러가 나는지 실시간으로 관찰하고 싶다면 로그 명령어를 쓰시면 됩니다.
+
+        Bash
+        # 인증 서비스의 프린트문/로그 실시간 확인
+        docker compose logs -f auth-service
+        
+5.  **무중단 부분 업데이트:** 나중에 `imap-order` 서비스의 코드만 수정해서 서버에 다시 올렸다면, 전체를 껐다 켤 필요 없이 해당 서비스만 아래 명령어로 깔끔하게 재빌드할 수 있습니다.
+    ```bash
+    docker compose up -d --build order-service
+
+
