@@ -153,3 +153,130 @@ ansible-playbook -i inventory/dev.ini deploy.yml --tags vue3
 주의사항
 항목내용WinRM 사전 설정대상 VM에서 winrm quickconfig 실행 필요NSSM 권장sc.exe로 등록한 nginx는 재시작 정책이 약함 → 운영 전환 시 NSSM으로 교체 권장Vue3 빌드npm run build 후 dist/ 폴더를 roles/nginx_vue3/files/dist/에 넣고 실행Nginx 경로Windows는 경로에 역슬래시(\) 사용, conf 파일 내부는 슬래시(/) 사용
 Nginx 역할(정적 서빙 vs API proxy)이 확정되면 nginx.conf.j2 부분 더 구체화해드릴 수 있어요.
+
+
+nginx.conf.j2 (실제 구조 반영)
+nginxworker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout  65;
+
+    # imap-* MS 업스트림 정의 (Spring Boot 내부 호출용 - 참고)
+    # 실제 브라우저→MS 직접 호출은 없으나 향후 확장 대비
+    upstream springboot {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen       80;
+        server_name  localhost;
+
+        # ── 1. Vue3 SPA 정적 서빙 ──────────────────────
+        root   html;
+        index  index.html;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # ── 2. API → Spring Boot 프록시 ────────────────
+        # 모든 /api/ 요청은 반드시 Spring Boot 통과
+        location /api/ {
+            proxy_pass         http://springboot/api/;
+            proxy_http_version 1.1;
+
+            proxy_set_header   Host              $host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+
+            # 세션 쿠키 전달
+            proxy_set_header   Cookie            $http_cookie;
+            proxy_pass_header  Set-Cookie;
+
+            # 타임아웃 (MS 처리 시간 고려)
+            proxy_connect_timeout  10s;
+            proxy_read_timeout     60s;
+            proxy_send_timeout     60s;
+        }
+
+        # ── 3. WebSocket (필요 시) ──────────────────────
+        # location /ws/ {
+        #     proxy_pass          http://springboot/ws/;
+        #     proxy_http_version  1.1;
+        #     proxy_set_header    Upgrade    $http_upgrade;
+        #     proxy_set_header    Connection "upgrade";
+        # }
+
+        # ── 4. 보안 헤더 ────────────────────────────────
+        add_header X-Frame-Options        "SAMEORIGIN";
+        add_header X-Content-Type-Options "nosniff";
+        add_header X-XSS-Protection       "1; mode=block";
+
+        # ── 5. imap-* 직접 접근 차단 ────────────────────
+        # 외부에서 MS 포트로 직접 접근 시 차단 (방화벽과 이중 방어)
+        location ~ ^/internal/ {
+            deny all;
+            return 403;
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root html;
+        }
+    }
+}
+
+Spring Boot 내부 MS 호출 구조 (참고)
+Spring Boot에서 imap-* 호출 시 권장 패턴이에요.
+# 각 MS 포트 권장 배치 (같은 VM 내부 127.0.0.1)
+imap-user      → 127.0.0.1:8101
+imap-auth      → 127.0.0.1:8102
+imap-message   → 127.0.0.1:8103
+imap-order     → 127.0.0.1:8104
+...
+imap-****      → 127.0.0.1:810N
+
+# Spring Boot application.yml 예시
+imap:
+  user-service:    http://127.0.0.1:8101
+  auth-service:    http://127.0.0.1:8102
+  message-service: http://127.0.0.1:8103
+
+Ansible role 추가/변경 포인트
+기존 roles/nginx_vue3/ 구조에서 아래만 추가하면 돼요.
+yaml# tasks/main.yml 에 추가
+
+- name: Spring Boot 기동 확인 후 Nginx 시작
+  win_wait_for:
+    port: 8080
+    host: 127.0.0.1
+    timeout: 30
+  before: Nginx 서비스 시작 task
+
+- name: imap-* 포트 방화벽 외부 차단 (내부만 허용)
+  win_firewall_rule:
+    name: "Block imap external {{ item }}"
+    localport: "{{ item }}"
+    action: block
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: yes
+  loop:
+    - 8101
+    - 8102
+    - 8103
+    - 8104
+    # ... MS 포트 목록
+
+핵심 보안 원칙 요약
+레이어역할Nginx외부 진입점, Vue3 서빙, /api/ 프록시Spring Boot인증/세션 검증, MS 라우팅 게이트웨이imap-* (Python)비즈니스 로직, 127.0.0.1 바인딩만 허용방화벽imap-* 포트 외부 직접 접근 차단
+imap-* MS 목록(10개)과 각 포트 번호가 확정되면 Ansible group_vars에 리스트로 관리하는 구조로 더 깔끔하게 잡아드릴 수 있어요.
