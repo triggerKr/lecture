@@ -1,7 +1,8 @@
 <ul>
-  <li>E:\ Drive
+  <li>
     <details open>
-      <summary>📂 <b>src</b> (클릭하면 접힙니다)</summary>
+      <summary><img width="115" height="24" alt="image" src="https://github.com/user-attachments/assets/5fdee888-6a2d-431b-9bd7-31a231cd821e" />
+ <b>📂</b> E:\ Drive</summary>
       <ul>
         <li>
           <details>
