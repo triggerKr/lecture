@@ -1,0 +1,211 @@
+전체 role 구조
+roles/
+├── nssm_setup/          # NSSM 다운로드 & 설치
+├── jdk_setup/           # JDK 설치 여부 확인 & 설치
+├── nginx_service/       # Nginx NSSM 서비스 등록
+└── springboot_service/  # Spring Boot NSSM 서비스 등록
+
+group_vars/windows.yml (변수 통합)
+yaml# NSSM
+nssm_version: "2.24"
+nssm_install_dir: "E:\\tools\\nssm"
+
+# JDK
+jdk_version: "21"
+jdk_install_dir: "E:\\jdk"
+jdk_download_url: "https://download.oracle.com/java/21/latest/jdk-21_windows-x64_bin.zip"
+
+# Nginx
+nginx_install_dir: "E:\\nginx"
+nginx_service_name: "svc-nginx"
+nginx_port: 80
+
+# Spring Boot
+springboot_jar: "E:\\app\\hiware-app.jar"
+springboot_service_name: "svc-springboot"
+springboot_port: 8080
+springboot_jvm_opts: "-Xms512m -Xmx1024m -Dspring.profiles.active=dev"
+springboot_log_dir: "E:\\app\\logs"
+
+roles/nssm_setup/tasks/main.yml
+yaml- name: NSSM 디렉토리 생성
+  win_file:
+    path: "{{ nssm_install_dir }}"
+    state: directory
+
+- name: NSSM 이미 설치됐는지 확인
+  win_stat:
+    path: "{{ nssm_install_dir }}\\nssm.exe"
+  register: nssm_stat
+
+- name: NSSM 다운로드
+  win_get_url:
+    url: "https://nssm.cc/release/nssm-{{ nssm_version }}.zip"
+    dest: "C:\\Temp\\nssm.zip"
+  when: not nssm_stat.stat.exists
+
+- name: NSSM 압축 해제
+  win_unzip:
+    src: "C:\\Temp\\nssm.zip"
+    dest: "C:\\Temp\\nssm_extract"
+  when: not nssm_stat.stat.exists
+
+- name: NSSM 실행파일 복사 (64bit)
+  win_copy:
+    src: "C:\\Temp\\nssm_extract\\nssm-{{ nssm_version }}\\win64\\nssm.exe"
+    dest: "{{ nssm_install_dir }}\\nssm.exe"
+    remote_src: yes
+  when: not nssm_stat.stat.exists
+
+- name: NSSM PATH 등록
+  win_path:
+    elements: "{{ nssm_install_dir }}"
+    state: present
+
+roles/jdk_setup/tasks/main.yml
+yaml- name: JAVA_HOME 환경변수 존재 확인
+  win_shell: |
+    [System.Environment]::GetEnvironmentVariable("JAVA_HOME", "Machine")
+  register: java_home_check
+
+- name: java 실행 가능 여부 확인
+  win_shell: java -version
+  register: java_version_check
+  ignore_errors: yes
+
+- name: JDK 설치 필요 여부 출력
+  debug:
+    msg: "JDK 미설치 → 자동 설치 진행"
+  when: java_version_check.rc != 0
+
+- name: JDK 디렉토리 생성
+  win_file:
+    path: "{{ jdk_install_dir }}"
+    state: directory
+  when: java_version_check.rc != 0
+
+- name: JDK 다운로드
+  win_get_url:
+    url: "{{ jdk_download_url }}"
+    dest: "C:\\Temp\\jdk.zip"
+  when: java_version_check.rc != 0
+
+- name: JDK 압축 해제
+  win_unzip:
+    src: "C:\\Temp\\jdk.zip"
+    dest: "{{ jdk_install_dir }}"
+  when: java_version_check.rc != 0
+
+- name: JAVA_HOME 환경변수 등록
+  win_environment:
+    name: JAVA_HOME
+    value: "{{ jdk_install_dir }}"
+    level: machine
+    state: present
+  when: java_version_check.rc != 0
+
+- name: JDK bin PATH 등록
+  win_path:
+    elements: "{{ jdk_install_dir }}\\bin"
+    state: present
+  when: java_version_check.rc != 0
+
+roles/nginx_service/tasks/main.yml
+yaml- name: 기존 Nginx 서비스 제거 (재등록 대비)
+  win_shell: |
+    if (Get-Service -Name "{{ nginx_service_name }}" -ErrorAction SilentlyContinue) {
+      {{ nssm_install_dir }}\nssm.exe stop {{ nginx_service_name }}
+      {{ nssm_install_dir }}\nssm.exe remove {{ nginx_service_name }} confirm
+    }
+
+- name: NSSM으로 Nginx 서비스 등록
+  win_shell: |
+    {{ nssm_install_dir }}\nssm.exe install {{ nginx_service_name }} {{ nginx_install_dir }}\nginx.exe
+
+- name: Nginx 서비스 세부 설정
+  win_shell: |
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} AppDirectory {{ nginx_install_dir }}
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} DisplayName "Nginx Web Server"
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} Description "Nginx reverse proxy & static server"
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} Start SERVICE_AUTO_START
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} AppStdout {{ nginx_install_dir }}\logs\service_stdout.log
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} AppStderr {{ nginx_install_dir }}\logs\service_stderr.log
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} AppRotateFiles 1
+    {{ nssm_install_dir }}\nssm.exe set {{ nginx_service_name }} AppRotateBytes 10485760
+
+- name: Nginx 서비스 시작
+  win_service:
+    name: "{{ nginx_service_name }}"
+    state: started
+    start_mode: auto
+
+- name: Nginx 기동 확인
+  win_wait_for:
+    port: "{{ nginx_port }}"
+    host: 127.0.0.1
+    timeout: 30
+
+roles/springboot_service/tasks/main.yml
+yaml- name: Spring Boot 로그 디렉토리 생성
+  win_file:
+    path: "{{ springboot_log_dir }}"
+    state: directory
+
+- name: 기존 Spring Boot 서비스 제거 (재등록 대비)
+  win_shell: |
+    if (Get-Service -Name "{{ springboot_service_name }}" -ErrorAction SilentlyContinue) {
+      {{ nssm_install_dir }}\nssm.exe stop {{ springboot_service_name }}
+      {{ nssm_install_dir }}\nssm.exe remove {{ springboot_service_name }} confirm
+    }
+
+- name: NSSM으로 Spring Boot 서비스 등록
+  win_shell: |
+    {{ nssm_install_dir }}\nssm.exe install {{ springboot_service_name }} java
+
+- name: Spring Boot 서비스 세부 설정
+  win_shell: |
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppParameters "{{ springboot_jvm_opts }} -jar {{ springboot_jar }}"
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppDirectory E:\app
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} DisplayName "HiWare Spring Boot App"
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} Description "HiWare Backend API Server"
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} Start SERVICE_AUTO_START
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppStdout {{ springboot_log_dir }}\stdout.log
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppStderr {{ springboot_log_dir }}\stderr.log
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppRotateFiles 1
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppRotateBytes 52428800
+    {{ nssm_install_dir }}\nssm.exe set {{ springboot_service_name }} AppRestartDelay 5000
+
+- name: Spring Boot 서비스 시작
+  win_service:
+    name: "{{ springboot_service_name }}"
+    state: started
+    start_mode: auto
+
+- name: Spring Boot 기동 확인 (포트 응답 대기)
+  win_wait_for:
+    port: "{{ springboot_port }}"
+    host: 127.0.0.1
+    timeout: 60
+
+deploy.yml (전체 순서 제어)
+yaml- name: Windows VM 서비스 전체 구성
+  hosts: windows
+  gather_facts: yes
+
+  roles:
+    - nssm_setup        # 1. NSSM 설치
+    - jdk_setup         # 2. JDK 확인/설치
+    - nginx_vue3        # 3. Nginx 설치 + conf 배포
+    - nginx_service     # 4. Nginx → NSSM 서비스 등록
+    - springboot_service # 5. Spring Boot → NSSM 서비스 등록
+
+서비스 기동 순서 (중요)
+Windows 부팅
+    │
+    ├─ 1. svc-springboot 자동 시작 (NSSM)
+    │       java -jar hiware-app.jar
+    │
+    └─ 2. svc-nginx 자동 시작 (NSSM)
+            Spring Boot :8080 준비 완료 후 트래픽 수신
+Spring Boot가 먼저 떠야 Nginx 프록시가 정상 동작하므로, NSSM의 AppRestartDelay로 순서를 간접 제어하거나, 향후 AppDependencies 설정으로 명시적 의존성도 걸 수 있어요.
+imap-* Python MS들의 NSSM 서비스 등록도 같은 패턴으로 확장하면 되니, MS 목록이 확정되면 말씀해주세요!
