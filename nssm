@@ -1,0 +1,127 @@
+완벽해요! GUI, CLI, Ansible 세 가지 방식과 Nginx / Spring Boot / Python 전부 다 정리해드릴게요.
+
+NSSM 기본 개념
+NSSM = Non-Sucking Service Manager
+exe, bat, jar, py 등 어떤 실행파일이든
+→ Windows 서비스로 등록해주는 도구
+
+핵심: "이 명령어를 Windows가 부팅될 때 자동 실행하고, 죽으면 자동 재시작해줘"
+
+0. NSSM 다운로드 & 배치
+https://nssm.cc/download 에서 nssm-2.24.zip 다운로드
+→ 압축 해제 후 win64\nssm.exe 를 E:\tools\nssm\ 에 복사
+→ 시스템 환경변수 PATH에 E:\tools\nssm 추가 (선택)
+
+1. GUI 방식 (화면으로 등록)
+CMD 또는 PowerShell을 관리자 권한으로 열고:
+cmdnssm install
+아래 화면이 뜨면 각 탭에서 설정해요.
+┌─────────────────────────────────────────────┐
+│  NSSM service installer                     │
+├─────────────────────────────────────────────┤
+│ [Application 탭]                            │
+│  Service name : svc-nginx                   │
+│  Path         : E:\nginx\nginx.exe          │
+│  Startup dir  : E:\nginx                    │
+│  Arguments    : (비워도 됨)                  │
+├─────────────────────────────────────────────┤
+│ [Details 탭]                                │
+│  Display name : Nginx Web Server            │
+│  Startup type : Automatic                   │
+├─────────────────────────────────────────────┤
+│ [I/O 탭]                                    │
+│  Stdout : E:\nginx\logs\stdout.log          │
+│  Stderr : E:\nginx\logs\stderr.log          │
+└─────────────────────────────────────────────┘
+         → [Install service] 클릭
+특정 서비스명으로 바로 열 수도 있어요:
+cmdnssm install svc-nginx
+nssm install svc-springboot
+nssm install svc-imap-user
+
+2. CLI 방식 (CMD/PowerShell)
+관리자 권한 PowerShell에서 실행해요.
+① Nginx 등록
+powershell# 서비스 등록
+nssm install svc-nginx E:\nginx\nginx.exe
+
+# 세부 설정
+nssm set svc-nginx AppDirectory    E:\nginx
+nssm set svc-nginx DisplayName     "Nginx Web Server"
+nssm set svc-nginx Description     "Nginx reverse proxy & static file server"
+nssm set svc-nginx Start           SERVICE_AUTO_START
+nssm set svc-nginx AppStdout       E:\nginx\logs\stdout.log
+nssm set svc-nginx AppStderr       E:\nginx\logs\stderr.log
+nssm set svc-nginx AppRotateFiles  1
+nssm set svc-nginx AppRotateBytes  10485760   # 10MB
+
+# 시작
+nssm start svc-nginx
+② Spring Boot (java -jar) 등록
+powershell# java 실행파일을 등록하고, -jar 옵션을 Arguments로 넘김
+nssm install svc-springboot "E:\jdk\bin\java.exe"
+
+nssm set svc-springboot AppParameters  "-Xms512m -Xmx1024m -Dspring.profiles.active=dev -jar E:\app\hiware-app.jar"
+nssm set svc-springboot AppDirectory   E:\app
+nssm set svc-springboot DisplayName    "HiWare Spring Boot"
+nssm set svc-springboot Start          SERVICE_AUTO_START
+nssm set svc-springboot AppStdout      E:\app\logs\stdout.log
+nssm set svc-springboot AppStderr      E:\app\logs\stderr.log
+nssm set svc-springboot AppRotateFiles 1
+nssm set svc-springboot AppRotateBytes 52428800   # 50MB
+nssm set svc-springboot AppRestartDelay 5000      # 실패 시 5초 후 재시작
+
+nssm start svc-springboot
+③ Python MS 등록 (venv 환경)
+Python은 venv 안의 python.exe를 직접 지정해야 해요.
+powershell# imap-user 예시
+nssm install svc-imap-user "E:\imap\imap-user\.venv\Scripts\python.exe"
+
+nssm set svc-imap-user AppParameters  "E:\imap\imap-user\main.py"
+nssm set svc-imap-user AppDirectory   E:\imap\imap-user
+nssm set svc-imap-user DisplayName    "imap-user Microservice"
+nssm set svc-imap-user Start          SERVICE_AUTO_START
+nssm set svc-imap-user AppStdout      E:\imap\imap-user\logs\stdout.log
+nssm set svc-imap-user AppStderr      E:\imap\imap-user\logs\stderr.log
+nssm set svc-imap-user AppRotateFiles 1
+nssm set svc-imap-user AppRestartDelay 3000
+
+# 환경변수 주입 (필요 시)
+nssm set svc-imap-user AppEnvironmentExtra "APP_ENV=dev" "DB_URL=jdbc:oracle:..."
+
+nssm start svc-imap-user
+
+3. 자주 쓰는 NSSM 명령어
+powershell# 서비스 상태 확인
+nssm status svc-nginx
+
+# 서비스 편집 (GUI 열림)
+nssm edit svc-nginx
+
+# 서비스 시작 / 중지 / 재시작
+nssm start   svc-nginx
+nssm stop    svc-nginx
+nssm restart svc-nginx
+
+# 서비스 제거
+nssm stop   svc-nginx
+nssm remove svc-nginx confirm
+
+# 현재 설정값 확인
+nssm get svc-nginx AppParameters
+nssm get svc-nginx Start
+
+4. 전체 서비스 목록 & 기동 순서 정리
+Windows 부팅 자동 시작 순서 (권장)
+─────────────────────────────────────
+1. svc-springboot   ← java -jar (포트 8080)
+2. svc-imap-user    ← python .venv (포트 8101)
+3. svc-imap-auth    ← python .venv (포트 8102)
+4. svc-imap-****    ← python .venv (포트 810N)
+   ... (MS 10개)
+5. svc-nginx        ← nginx.exe   (포트 80)
+Spring Boot와 imap-* 가 모두 뜬 뒤 Nginx가 마지막에 올라와야 502 에러를 피할 수 있어요. NSSM의 AppRestartDelay와 AppDependencies로 순서를 제어할 수 있어요.
+powershell# Nginx가 Spring Boot 서비스에 의존하도록 설정
+nssm set svc-nginx AppDependencies svc-springboot
+
+imap-* MS 10개 목록이 확정되면 일괄 등록하는 PowerShell 스크립트나 Ansible loop로 한번에 처리하는 코드도 만들어드릴 수 있어요.
