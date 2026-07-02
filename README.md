@@ -1,7 +1,7 @@
 <ul>
   <li>
     <details open>
-      <summary><img width="115" height="24" alt="image" src="https://github.com/user-attachments/assets/5fdee888-6a2d-431b-9bd7-31a231cd821e" />
+      <summary>
  <b>📂</b> E:\ Drive</summary>
       <ul>
         <li>
