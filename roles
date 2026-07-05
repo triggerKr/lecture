@@ -1,3 +1,123 @@
+imap-deployment.bat 구현 (인자값 처리)
+배치 파일에서 %1은 첫 번째로 넘어온 파라미터(인자값)를 의미합니다. 예를 들어 imap-deployment.bat productA라고 실행하면 %1은 productA가 됩니다.
+
+이 인자값을 조건문(if)으로 분기하여 각 프로그램에 맞는 서비스 이름과 실행 경로를 지정하도록 작성합니다.
+
+DOS
+@echo off
+chcp 65001 > nul
+:: %1 인자값이 비어있는지 확인
+if "%1"=="" (
+    echo [ERROR] 프로덕트 이름이 지정되지 않았습니다. (예: imap-deployment.bat vue3)
+    exit /b 1
+)
+
+:: 인자값을 소문자로 통일하거나 대소문자 구분 없이 처리하기 위해 변수 지정
+set APP_NAME=%1
+
+:: --------------------------------------------------
+:: [조건 분기] 입력된 인자값에 따라 서비스명과 경로 설정
+:: --------------------------------------------------
+if /I "%APP_NAME%"=="vue3" (
+    echo ======= VUE3 (Nginx) 웹서버 관리 =======
+    set SERVICE_NAME=Imap_Nginx
+    :: Vue3는 정적 파일 복사 후 Nginx 서비스만 재시작하면 됨
+    goto REDEPLOY_SERVICE
+)
+
+if /I "%APP_NAME%"=="springboot" (
+    echo ======= Spring Boot 백엔드 서비스 관리 =======
+    set SERVICE_NAME=Imap_SpringBoot
+    set BINARY_PATH=C:\apps\backend\imap-api.jar
+    set RUN_CMD=java -jar %BINARY_PATH%
+    goto REINSTALL_SERVICE
+)
+
+if /I "%APP_NAME%"=="python_a" (
+    echo ======= Python Microservice A 관리 =======
+    set SERVICE_NAME=Imap_Python_A
+    set PYTHON_EXE=C:\apps\venv\Scripts\python.exe
+    set SCRIPT_PATH=C:\apps\py_service_a\main.py
+    set RUN_CMD=%PYTHON_EXE% %SCRIPT_PATH%
+    goto REINSTALL_SERVICE
+)
+
+if /I "%APP_NAME%"=="python_b" (
+    echo ======= Python Microservice B 관리 =======
+    set SERVICE_NAME=Imap_Python_B
+    set PYTHON_EXE=C:\apps\venv\Scripts\python.exe
+    set SCRIPT_PATH=C:\apps\py_service_b\main.py
+    set RUN_CMD=%PYTHON_EXE% %SCRIPT_PATH%
+    goto REINSTALL_SERVICE
+)
+
+echo [ERROR] 알 수 없는 프로덕트 이름입니다: %APP_NAME%
+exit /b 1
+
+
+:: --------------------------------------------------
+:: [공통 로직 1] 서비스 삭제 후 재등록 (스프링부트, 파이썬용)
+:: * 여기서는 가장 안정적인 서비스 등록 툴인 nssm을 예시로 듭니다.
+:: --------------------------------------------------
+:REINSTALL_SERVICE
+echo 1. 기존 %SERVICE_NAME% 서비스 중지 및 제거...
+nssm stop %SERVICE_NAME% 2>nul
+nssm remove %SERVICE_NAME% confirm 2>nul
+
+echo 2. 최신 파일로 %SERVICE_NAME% 서비스 등록...
+nssm install %SERVICE_NAME% %RUN_CMD%
+nssm set %SERVICE_NAME% Description "IMAP 마이크로서비스 - %APP_NAME%"
+nssm set %SERVICE_NAME% Start SERVICE_AUTO_START
+
+echo 3. 서비스 시작...
+nssm start %SERVICE_NAME%
+goto END
+
+:: --------------------------------------------------
+:: [공통 로직 2] 단순 서비스 재시작 (Nginx 등)
+:: --------------------------------------------------
+:REDEPLOY_SERVICE
+echo 1. %SERVICE_NAME% 서비스 재시작...
+net stop %SERVICE_NAME% 2>nul
+net start %SERVICE_NAME%
+goto END
+
+:END
+echo ======= %SERVICE_NAME% 배포 완료 =======
+exit /b 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 전체 role 구조
 roles/
 ├── nssm_setup/          # NSSM 다운로드 & 설치
