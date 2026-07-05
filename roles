@@ -209,3 +209,77 @@ Windows 부팅
             Spring Boot :8080 준비 완료 후 트래픽 수신
 Spring Boot가 먼저 떠야 Nginx 프록시가 정상 동작하므로, NSSM의 AppRestartDelay로 순서를 간접 제어하거나, 향후 AppDependencies 설정으로 명시적 의존성도 걸 수 있어요.
 imap-* Python MS들의 NSSM 서비스 등록도 같은 패턴으로 확장하면 되니, MS 목록이 확정되면 말씀해주세요!
+
+
+
+\===============
+
+Ansible Playbook에서 호출하는 방법
+이제 Ansible에서는 각 프로그램을 배포(win_copy 등)한 직후, 위에서 만든 배치 파일에 각자 자기 이름을 인자로 넘겨서 실행하면 됩니다.
+
+YAML
+- name: IMAP 마이크로서비스 배포 플레이북
+  hosts: windows_vms
+  tasks:
+
+    # 1. Vue3 프론트엔드 배포
+    - name: Vue3 빌드 파일 복사
+      ansible.windows.win_copy:
+        src: /local/path/dist/
+        dest: C:\nginx\html\
+      notify: Restart Vue3
+
+    # 2. 스프링부트 배포
+    - name: Spring Boot JAR 파일 복사
+      ansible.windows.win_copy:
+        src: /local/path/imap-api.jar
+        dest: C:\apps\backend\
+      notify: Restart SpringBoot
+
+    # 3. 파이썬 서비스 A 배포
+    - name: Python Service A 소스 복사
+      ansible.windows.win_copy:
+        src: /local/path/py_a/
+        dest: C:\apps\py_service_a\
+      notify: Restart PythonA
+
+  handlers:
+    - name: Restart Vue3
+      ansible.windows.win_command: C:\apps\deploy\imap-deployment.bat vue3
+
+    - name: Restart SpringBoot
+      ansible.windows.win_command: C:\apps\deploy\imap-deployment.bat springboot
+
+    - name: Restart PythonA
+      ansible.windows.win_command: C:\apps\deploy\imap-deployment.bat python_a
+👍 이 방식의 장점
+완벽한 격리: Ansible이 플레이북을 실행할 때 Vue3와 SpringBoot가 동시에 변경되어 핸들러가 실행되더라도, 하나는 imap-deployment.bat vue3를, 다른 하나는 imap-deployment.bat springboot를 실행합니다. 서로 다루는 서비스(Imap_Nginx vs Imap_SpringBoot)가 다르기 때문에 충돌이 전혀 일어나지 않습니다.
+
+관리 편의성: 한 대의 VM 안에 4개의 서비스가 Imap_이라는 접두사를 달고 예쁘게 정렬되므로, 윈도우 서비스 관리창(services.msc)을 켰을 때 한눈에 모니터링하기 매우 편합니다.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
