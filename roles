@@ -151,3 +151,31 @@ public class JwtUtil {
         chain.doFilter(request, response);
     }
 }
+
+=====================================
+
+
+@PostMapping("/login")
+public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+    SessionVO user = userService.authenticate(loginRequest.getUsername(), loginRequest.getPassword());
+    
+    if (user == null) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인 실패");
+    }
+
+    // 1. 토큰 2개 생성
+    String accessToken = jwtUtil.createAccessToken(user);
+    String refreshToken = jwtUtil.createRefreshToken(user.getLoginId());
+
+    // 2. (선택사항) RefreshToken은 Redis나 DB에 저장하여 추후 검증 및 중복 로그인 방지에 활용
+    tokenService.saveRefreshToken(user.getLoginId(), refreshToken);
+
+    // 3. 두 토큰을 응답으로 보냄 (RefreshToken은 보안상 HttpOnly 쿠키에 넣기도 합니다)
+    return ResponseEntity.ok()
+            .header("Authorization", "Bearer " + accessToken)
+            .body(Map.of(
+                "accessToken", accessToken,
+                "refreshToken", refreshToken,
+                "userName", user.getLoginNm()
+            ));
+}
