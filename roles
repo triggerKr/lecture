@@ -23,3 +23,88 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
+
+
+
+===========================================================================================
+
+
+package techyu.com.security;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.web.filter.OncePerRequestFilter;
+import techyu.com.common.TechyuConstants;
+import techyu.com.common.vo.SessionVO;
+
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.Collections;
+
+public class JwtAuthFilter extends OncePerRequestFilter {
+
+    private final JwtUtil jwtUtil;
+
+    public JwtAuthFilter(JwtUtil jwtUtil) {
+        this.jwtUtil = jwtUtil;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain chain) throws ServletException, IOException {
+
+        String header = request.getHeader("Authorization");
+
+        if (header != null && header.startsWith("Bearer ")) {
+            String token = header.substring(7);
+            try {
+                Claims claims = jwtUtil.parseToken(token);
+
+                if (jwtUtil.isAccessToken(claims)) {
+                    // 1. SessionVO 생성 및 세션 주입 (기존 비즈니스 로직 유지)
+                    SessionVO sessionVO = new SessionVO();
+                    sessionVO.setLoginId (claims.getSubject());
+                    sessionVO.setLoginNm (claims.get("userName", String.class));
+                    sessionVO.setUserId  (claims.get("userId",   String.class));
+                    sessionVO.setUserNm  (claims.get("userName", String.class));
+                    sessionVO.setUserType(claims.get("userType", String.class));
+
+                    request.getSession(true).setAttribute(TechyuConstants.SESSION_ID, sessionVO);
+
+                    // ================= [여기서부터 스프링 시큐리티 연동 추가] =================
+                    // 2. 스프링 시큐리티 표준 객체인 UserDetails 생성 (또는 커스텀 구현체 사용 가능)
+                    //    여기서 sessionVO.getLoginId()를 Username으로 지정하고 패스워드는 빈값, 권한은 빈 리스트를 줍니다.
+                    UserDetails userDetails = User.withUsername(sessionVO.getLoginId())
+                            .password("") 
+                            .authorities(Collections.emptyList()) // 필요 시 권한 주입
+                            .build();
+
+                    // 3. 시큐리티용 인증 객체(Authentication) 생성
+                    UsernamePasswordAuthenticationToken authentication = 
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                    
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    // 4. ★핵심★ 스프링 시큐리티 홀더에 인증 정보 등록
+                    // 이 작업을 해두어야 컨트롤러에서 @AuthenticationPrincipal로 꺼낼 수 있습니다.
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    // ====================================================================
+                }
+            } catch (JwtException e) {
+                // 검증 실패 시 시큐리티 컨텍스트 비우기
+                SecurityContextHolder.clearContext();
+            }
+        }
+
+        chain.doFilter(request, response);
+    }
+}
