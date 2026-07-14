@@ -105,6 +105,49 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
         }
 
+
+===========================================================
+
+
+@Component
+public class JwtUtil {
+
+    private final String SECRET_KEY = "your-very-secure-and-long-secret-key-for-techyu-project";
+    private final Key key = Keys.hmacShaKeyFor(SECRET_KEY.getBytes());
+    
+    // 만료 시간 설정
+    private final long ACCESS_TOKEN_EXPIRATION = 1000L * 60 * 60;       // 1시간
+    private final long REFRESH_TOKEN_EXPIRATION = 1000L * 60 * 60 * 24 * 14; // 14일
+
+    /**
+     * 1시간짜리 AccessToken 생성 (사용자 세부 정보 포함)
+     */
+    public String createAccessToken(SessionVO sessionVO) {
+        return Jwts.builder()
+                .setSubject(sessionVO.getLoginId())
+                .claim("userId", sessionVO.getUserId())
+                .claim("userName", sessionVO.getLoginNm())
+                .claim("userType", sessionVO.getUserType())
+                .claim("tokenType", "ACCESS_TOKEN")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXPIRATION))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    /**
+     * 14일짜리 RefreshToken 생성 (보안을 위해 최소한의 정보만 주입)
+     */
+    public String createRefreshToken(String loginId) {
+        return Jwts.builder()
+                .setSubject(loginId)
+                .claim("tokenType", "REFRESH_TOKEN")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+}
         chain.doFilter(request, response);
     }
 }
