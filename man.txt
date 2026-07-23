@@ -1,3 +1,55 @@
+--------------------------------------------------------------------------------
+-- 1단계: 개인 사용자용 PROFILE 생성 (보안 규정 준수용)
+-- (이미 만들어두신 USER_PROFILE이 있다면 이 단계는 생략 가능합니다)
+--------------------------------------------------------------------------------
+CREATE PROFILE USER_PROFILE LIMIT
+  FAILED_LOGIN_ATTEMPTS 5         -- 비밀번호 5회 틀리면 잠김
+  PASSWORD_LIFE_TIME 90           -- 90일마다 비밀번호 변경
+  PASSWORD_LOCK_TIME 1            -- 잠김 후 1일 뒤 자동 해제 (또는 UNLIMITED)
+  PASSWORD_GRACE_TIME 7;          -- 만료 전 7일간 경고 메시지
+
+--------------------------------------------------------------------------------
+-- 2단계: 개발자 개인 계정 생성 (USER_PROFILE 적용)
+--------------------------------------------------------------------------------
+CREATE USER DEV_USER IDENTIFIED BY "Password123!"
+  DEFAULT TABLESPACE USERS
+  TEMPORARY TABLESPACE TEMP
+  PROFILE USER_PROFILE;
+
+--------------------------------------------------------------------------------
+-- 3단계: 기본 접속 및 개발/작업 권한 부여
+--------------------------------------------------------------------------------
+-- DB 접속 및 기본 리소스 사용 권한
+GRANT CONNECT, RESOURCE TO DEV_USER;
+ALTER USER DEV_USER QUOTA UNLIMITED ON USERS;
+
+-- [개발 환경용] IMAP 스키마에 직접 DDL(테이블 생성/수정)을 칠 수 있는 권한
+-- ※ 운영 환경 적용 시에는 아래 ANY DDL 권한은 제외하고 DML 권한만 주는 것이 안전합니다.
+GRANT CREATE ANY TABLE TO DEV_USER;
+GRANT ALTER ANY TABLE TO DEV_USER;
+GRANT DROP ANY TABLE TO DEV_USER;
+GRANT CREATE ANY INDEX TO DEV_USER;
+
+-- [공통] IMAP 계정이 만든 테이블들을 조회/수정/삭제할 수 있는 권한
+GRANT SELECT ANY TABLE TO DEV_USER;
+GRANT INSERT ANY TABLE TO DEV_USER;
+GRANT UPDATE ANY TABLE TO DEV_USER;
+GRANT DELETE ANY TABLE TO DEV_USER;
+
+-- 동의어(Synonym) 생성 및 프로시저 실행 권한
+GRANT CREATE SYNONYM TO DEV_USER;
+GRANT EXECUTE ANY PROCEDURE TO DEV_USER;
+
+--------------------------------------------------------------------------------
+-- 4단계 (선택): IMAP 계정의 모든 테이블에 대한 Private Synonym 일괄 생성
+-- DEV_USER로 로그인했을 때 'IMAP.'을 안 붙이고 'SELECT * FROM 테이블명' 하기 위함
+--------------------------------------------------------------------------------
+BEGIN
+  FOR r IN (SELECT table_name FROM dba_tables WHERE owner = 'IMAP') LOOP
+    EXECUTE IMMEDIATE 'CREATE OR REPLACE SYNONYM DEV_USER.' || r.table_name || ' FOR IMAP.' || r.table_name;
+  END LOOP;
+END;
+/
 
 import org.springframework.http.*;
 import org.springframework.util.StreamUtils;
