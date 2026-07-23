@@ -1,3 +1,15 @@
+-- 디폴트/샘플 계정 존재 여부 및 상태 확인
+SELECT username, account_status, created
+FROM dba_users
+WHERE username IN (
+  'SCOTT', 'HR', 'OE', 'PM', 'SH', 'IX', 'BI', 'DEMO',
+  'OUTLN', 'DIP', 'ORACLE_OCM', 'TSMSYS', 'MDDATA', 
+  'SPATIAL', 'SI_INFORMTN_SCHEMA', 'LBACSYS', 'EXFSYS'
+)
+ORDER BY username;
+
+
+
 --------------------------------------------------------------------------------
 -- 1단계: 개인 사용자용 PROFILE 생성 (보안 규정 준수용)
 -- (이미 만들어두신 USER_PROFILE이 있다면 이 단계는 생략 가능합니다)
