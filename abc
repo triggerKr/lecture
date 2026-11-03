@@ -50,7 +50,7 @@ URL 형식을 보니 다행히 SID가 아니라 서비스명()으로 접속하�
 
 1. SCAN 설정이 정상인지
 
-AP 서버에서 nslookup ptimapdbd-scan.abc.net을 실행합니다. 보통 IP가 3개 나오고, 여러 번 실행하면 순서가 돌아가야 정상이에요.
+AP 서버에서 nslookup ptabcdbd-scan.abc.net을 실행합니다. 보통 IP가 3개 나오고, 여러 번 실행하면 순서가 돌아가야 정상이에요.
 DBA에게는 두 명령의 결과를 요청하세요.
 srvctl config scan, srvctl status scan_listener: SCAN 리스너 상태
 srvctl config service -d <DB명> -s ABCPROD: 서비스가 어느 노드에서 도는지
@@ -81,7 +81,7 @@ DBA가 srvctl stop instance -d <DB명> -i <노드1> -o immediate로 노드 하�
 노드가 응답하지 않을 때 접속이 오래 멈추지 않도록, 접속 제한 시간과 재시도 횟수를 넣는 방법이에요.
 
 jdbc:log4jdbc:oracle:thin:@(DESCRIPTION=(CONNECT_TIMEOUT=5)(RETRY_COUNT=3)
-(ADDRESS=(PROTOCOL=TCP)(HOST=ptimapdbd-scan.abc.net)(PORT=1524))
+(ADDRESS=(PROTOCOL=TCP)(HOST=ptabcdbd-scan.abc.net)(PORT=1524))
 (CONNECT_DATA=(SERVICE_NAME=ABCPROD)))
 가장 먼저 DBA에게 srvctl config service 결과를 받아 보시길 권해요. 이 결과에 따라 두 노드가 모두 일하는 구조(Active-Active)인지, 한 노드는 대기만 하는 구조(Active-Standby)인지가 결정됩니다.
 
