@@ -1,0 +1,134 @@
+l7 로드발랜서 스위치를 통해 두대의 AP서버(엔진X도 들어가 있고 스프링백엔드도 들어가 있고 뷰 화면 두 프로그램이 있어 이 로드발랜서에는 도메인이 연결되어 있는데 외부 사용자의 접근은 할 수 없는 상황이야
+이 로드 밸런스 서버가 제대로 로드밸런싱을 하는지 확인할 수 있는 방법이 있을까?
+
+L7 로드밸런서 장비는 어떤 제품인가요? (확인 방법이 장비마다 다릅니다)
+모름
+직접 손댈 수 있는 범위는 어디까지인가요? (해당하는 것 모두 선택)
+Nginx 설정 수정 가능
+주로 무엇을 확인하고 싶으신가요?
+요청이 두 서버로 나뉘는지, 한 대 장애 시 넘어가는지, 세션 유지(Sticky) 동작
+LB에 세션 유지(Sticky Session/Persistence)가 설정되어 있나요?
+모름
+질문에 답해 주셔서 감사합니다. 지금 수정할 수 있는 곳은 Nginx 설정뿐이에요. 그래도 각 서버가 응답 헤더에 자기 이름을 붙이게 하면 세 가지를 모두 확인할 수 있습니다.
+
+1. 두 AP 서버의 Nginx에 식별 헤더 추가
+
+nginx
+server {
+    ...
+    add_header X-Served-By $hostname always;
+}
+nginx -t로 설정을 검사한 뒤 nginx -s reload로 적용하세요. location 블록 안에 이미 add_header가 있으면 server 블록의 헤더가 상속되지 않아요. 그런 location에는 같은 줄을 따로 넣어 주세요.
+
+2. 요청이 두 서버로 나뉘는지 확인
+
+내부망 PC 브라우저에서 도메인에 접속하고 F12 → Network 탭을 엽니다. 요청을 하나 눌러 Response Headers의 X-Served-By 값을 봅니다.
+시크릿 창을 여러 번 새로 열어 접속해 보세요. 값이 두 서버로 번갈아 나오면 분산이 되고 있는 거예요.
+서버 접속이 가능하면 두 서버에서 동시에 tail -f /var/log/nginx/access.log를 띄워 놓고 요청이 양쪽에 찍히는지 봐도 됩니다.
+3. 세션 유지(Sticky) 확인
+
+같은 창에서 새로고침을 계속해도 X-Served-By 값이 그대로면 Sticky가 켜져 있는 거예요.
+F12 → Application → Cookies에서 LB가 만든 쿠키를 찾아보세요. BIGipServer...가 있으면 F5, NSC_...가 있으면 Citrix 장비입니다. 이것으로 장비 종류도 알 수 있어요.
+Sticky가 꺼져 있는데 Spring 세션을 메모리에 저장하고 있다면, 로그인이 자꾸 풀리는 증상이 생깁니다.
+4. 한 대 장애 시 넘어가는지 확인 (점검 시간에 하세요)
+
+서버 A에서 systemctl stop nginx로 Nginx를 멈춥니다. 그 뒤 모든 응답이 서버 B로 가는지 봅니다.
+다음으로 Nginx는 살려두고 Spring만 멈춰 보세요. 이때 502 에러가 계속 섞여 나온다면, LB가 포트가 열려 있는지만 검사하는 TCP 헬스체크를 쓰고 있다는 뜻이에요. 그러면 실제 장애를 감지하지 못합니다. LB 담당자에게 HTTP 헬스체크로 바꿔 달라고 요청하세요. 예를 들어 Spring의 /actuator/health 주소를 쓰게 할 수 있습니다.
+LB 관리 콘솔에 접근할 수 없으니, 정확한 분산 방식(라운드로빈 등)과 헬스체크 설정은 네트워크 담당자에게 확인하는 게 가장 확실해요.
+
+이제 이 각 ap서버에서 두 대의 이중화되어 scanids 방식으로 RAS오라클 접속을하는데  이 것도 이중화가 잘 된것인지 확인하는 방법이 있을까?
+
+Spring의 DB 접속 URL은 어떤 형태인가요? (application.yml 등의 jdbc url)
+2번인것 같은데 사실 
+DB 쪽에서 할 수 있는 것은 무엇인가요? (해당하는 것 모두 선택)
+앱 계정으로 SQL 실행 가능, DBA 협조 가능
+어떤 것을 확인하고 싶으신가요?
+커넥션이 두 노드로 나뉘는지, 한 노드 장애 시 앱이 계속 동작하는지, SCAN 자체 설정이 정상인지
+커넥션 풀은 무엇을 쓰나요?
+HikariCP (스프링부트 기본)
+URL 형식을 보니 다행히 SID가 아니라 서비스명()으로 접속하고 있어요. 호스트:포트/이름처럼 슬래시(/)로 쓰는 형식이 서비스명 방식입니다. RAC에서는 이게 맞는 방식이고, SID로 접속하면 한 노드에만 붙어요. 아래 순서대로 확인해 보세요.
+
+1. SCAN 설정이 정상인지
+
+AP 서버에서 nslookup ptimapdbd-scan.abc.net을 실행합니다. 보통 IP가 3개 나오고, 여러 번 실행하면 순서가 돌아가야 정상이에요.
+DBA에게는 두 명령의 결과를 요청하세요.
+srvctl config scan, srvctl status scan_listener: SCAN 리스너 상태
+srvctl config service -d <DB명> -s ABCPROD: 서비스가 어느 노드에서 도는지
+여기서 Preferred instances에 두 노드가 모두 있는지가 가장 중요합니다. 한 노드만 Preferred이고 다른 노드는 Available이면 Active-Standby 구성이에요. 평소에는 모든 커넥션이 한 노드로만 갑니다.
+2. 커넥션이 두 노드로 나뉘는지
+
+앱 계정으로 아래 SQL을 여러 번 실행하면 지금 붙은 노드를 볼 수 있어요.
+sql
+  SELECT SYS_CONTEXT('USERENV','INSTANCE_NAME') inst,
+         SYS_CONTEXT('USERENV','SERVER_HOST') host
+  FROM dual;
+더 정확하게 보려면 DBA에게 아래 쿼리를 부탁하세요.
+sql
+  SELECT inst_id, machine, COUNT(*)
+  FROM gv$session
+  WHERE username = '앱계정'
+  GROUP BY inst_id, machine;
+AP서버 2대 각각이 노드 1과 노드 2에 골고루 커넥션을 갖고 있으면 정상입니다.
+
+3. 한 노드 장애 시 동작하는지 (점검 시간에 DBA와 함께)
+
+DBA가 srvctl stop instance -d <DB명> -i <노드1> -o immediate로 노드 하나를 내리고, 그동안 화면에서 계속 조회와 저장을 해봅니다.
+현재 구성(HikariCP + thin 드라이버, 별도 페일오버 기능 없음)에서는 이렇게 동작할 거예요.
+죽은 노드에 붙어 있던 커넥션은 끊기고, 진행 중이던 요청은 에러가 납니다.
+몇 초 안에 HikariCP가 새 커넥션을 SCAN으로 맺어 살아 있는 노드로 붙고, 그 뒤로는 정상 동작합니다.
+노드를 복구한 다음에 다시 2번 쿼리를 확인하세요. HikariCP는 커넥션을 스스로 다시 분산하지 않아요. maxLifetime(기본 30분)이 지나 커넥션이 교체될 때까지 한쪽에 몰려 있을 수 있습니다.
+참고: 장애 시 접속 지연을 줄이는 URL 형식
+노드가 응답하지 않을 때 접속이 오래 멈추지 않도록, 접속 제한 시간과 재시도 횟수를 넣는 방법이에요.
+
+jdbc:log4jdbc:oracle:thin:@(DESCRIPTION=(CONNECT_TIMEOUT=5)(RETRY_COUNT=3)
+(ADDRESS=(PROTOCOL=TCP)(HOST=ptimapdbd-scan.abc.net)(PORT=1524))
+(CONNECT_DATA=(SERVICE_NAME=ABCPROD)))
+가장 먼저 DBA에게 srvctl config service 결과를 받아 보시길 권해요. 이 결과에 따라 두 노드가 모두 일하는 구조(Active-Active)인지, 한 노드는 대기만 하는 구조(Active-Standby)인지가 결정됩니다.
+
+db서버를 내렸다가 올리는 방법
+
+어느 수준까지 내리려는 건가요?
+노드 1개 인스턴스만 (Recommended)
+작업은 누가 직접 하나요?
+내가 직접 함
+운영(ABCPROD) DB인데, 테스트는 언제 하나요?
+아직 미정
+이중화 테스트 목적이라면 srvctl로 인스턴스 하나만 내렸다 올리면 됩니다. 아래 명령은 모두 DB 서버에 oracle 계정으로 접속해서 실행하세요.
+
+1. 사전 확인
+
+bash
+srvctl config database                         # DB명 확인 (예: ABCPRD)
+srvctl status database -d <DB명>               # 인스턴스명과 상태
+srvctl status service -d <DB명>                # ABCPROD 서비스가 어느 인스턴스에서 도는지
+srvctl config service -d <DB명> -s ABCPROD    # Preferred/Available 구성
+여기서 나온 인스턴스명(예: ABCPRD1, ABCPRD2)을 아래 명령에 넣습니다.
+
+2. 인스턴스 1개 중지
+
+bash
+srvctl stop instance -d <DB명> -i <인스턴스1> -o immediate
+srvctl status database -d <DB명>    # 1번은 not running, 2번은 running인지 확인
+srvctl status service -d <DB명>     # 서비스가 2번 인스턴스에서 돌고 있는지 확인
+서비스가 1번 인스턴스에서만 돌도록 되어 있으면 중지 명령이 에러를 냅니다. 이때 -force를 붙이면 서비스가 끊긴 채로 내려가요. 에러가 나면 일단 멈추고 1번의 구성을 다시 확인하세요.
+-o abort는 쓰지 마세요. immediate만 써도 테스트하기에 충분합니다.
+3. 이 상태에서 앱 테스트
+화면에서 조회와 저장이 되는지, Spring 로그에 에러가 나는지 확인하세요. 에러가 나도 몇 초 안에 정상으로 돌아오면 OK입니다.
+
+4. 인스턴스 재기동
+
+bash
+srvctl start instance -d <DB명> -i <인스턴스1>
+srvctl status database -d <DB명>
+srvctl status service -d <DB명>
+서비스가 Available 방식이었다면 2번 인스턴스로 옮겨간 채 남아 있을 수 있어요. 그럴 땐 원래 자리로 되돌립니다.
+
+bash
+srvctl relocate service -d <DB명> -s ABCPROD -i <인스턴스2> -t <인스턴스1>
+5. 커넥션 재분산 확인
+앞에서 드린 gv$session 쿼리로 노드별 커넥션 수를 확인하세요. HikariCP 커넥션이 2번 노드에 몰려 있으면 maxLifetime(기본 30분)이 지나 자연스럽게 다시 나뉘기를 기다리면 됩니다. 급하면 AP서버를 한 대씩 재기동해도 돼요.
+
+주의할 점
+
+운영 DB라서, 인스턴스 하나만 내려도 그 노드에 붙어 있던 세션과 진행 중인 트랜잭션은 끊깁니다. 공식 점검 시간을 잡고 사전 승인을 받은 뒤 하세요.
+sqlplus에서 shutdown으로 내리는 방법보다 srvctl을 권합니다. srvctl로 내려야 클러스터웨어가 상태를 정확히 알 수 있어요.
